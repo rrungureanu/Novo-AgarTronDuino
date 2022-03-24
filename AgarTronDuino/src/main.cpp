@@ -58,7 +58,8 @@ AccelStepper Stepper_G1(1,PIN_G1_STEP,PIN_G1_DIR), Stepper_G2(1,PIN_G2_STEP,PIN_
 unsigned int platecount_L6 = 0, platecount_L9 = 0, platecount_R6 = 0, platecount_R9 = 0; 
 
 //Stack selection + phase enums and flags
-bool flag_stack_left = true, flag_L6_active, flag_L6_flushing, flag_L9_active, flag_L9_flushing, flag_R6_active, flag_R6_flushing, flag_R9_active, flag_R9_flushing, flag_G5_ready;
+bool flag_stack_left = true, flag_L6_active, flag_L6_flushing, flag_L9_active, flag_L9_flushing, flag_R6_active, flag_R6_flushing, flag_R9_active, flag_R9_flushing, 
+flag_G5_ready, flag_G5_readyChecked;
 enum phase_L6 {phase_L6_1, phase_L6_2, phase_L6_3, phase_L6_2F, phase_L6_3F, phase_L6_4F, phase_L6_5F, phase_L6_6F}; phase_L6 curr_phase_L6;
 enum phase_L9 {phase_L9_1, phase_L9_2, phase_L9_3, phase_L9_2F, phase_L9_3F, phase_L9_4F, phase_L9_5F, phase_L9_6F}; phase_L9 curr_phase_L9;
 enum phase_R6 {phase_R6_1, phase_R6_2, phase_R6_3, phase_R6_2F, phase_R6_3F, phase_R6_4F, phase_R6_5F, phase_R6_6F}; phase_R6 curr_phase_R6;
@@ -316,6 +317,7 @@ void msg_interpret(int msg){
     flag_G5_step = true;
     Stepper_G5.moveTo(POS_G5_R9);
   }
+  flag_G5_ready = false;
 }
 
 void phase_transition()
@@ -329,6 +331,7 @@ void phase_transition()
           curr_phase_L6 = phase_L6::phase_L6_2F; 
           flag_L6_flushing = true;
           timer_L6 = millis();
+          timer_L6_wait = true;
           flag_G5_step = false;
           flag_G3_step = true;
           Stepper_G3.moveTo(POS_TOP);
@@ -354,12 +357,53 @@ void phase_transition()
     case phase_L6::phase_L6_3:{
       if(Stepper_G5.distanceToGo() == 0){
         flag_L6_active = false;
+        flag_G5_ready = true;
       }
       break;
     }
     case phase_L6::phase_L6_2F:{
-      if(millis() - timer_L6 >= 1000){
-        
+      if(timer_L6_wait && millis() - timer_L6 >= 1000){ //After we have waited 1 sec for the elevator to descend, we can move the slider back to middle pos and go to 3F
+        curr_phase_L6 = phase_L6::phase_L6_3F;
+        flag_G5_readyChecked = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_L6::phase_L6_3F:{
+      if(Stepper_G5.distanceToGo() == 0 && !!flag_G5_readyChecked){
+        flag_G5_ready = flag_G5_readyChecked = true;
+        flag_G5_step = false;
+      }
+      if(Stepper_G3.distanceToGo() == 0){
+        curr_phase_L6 = phase_L6::phase_L6_4F;
+        flag_G3_step = false;
+        flag_G4_step = true;
+        Stepper_G4.moveTo(POS_G2467_BOT);
+      }
+      break;
+    }
+    case phase_L6::phase_L6_4F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_L6 = phase_L6::phase_L6_5F;
+        Stepper_G4.moveTo(POS_TOP);
+      }
+      break;
+    }
+    case phase_L6::phase_L6_5F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_L6 = phase_L6::phase_L6_6F;
+        flag_G4_step = false;
+        flag_G3_step = true;
+        Stepper_G3.moveTo(POS_G1389_BOT);
+      }
+      break;
+    }
+    case phase_L6::phase_L6_6F:{
+      if(Stepper_G3.distanceToGo() == 0){
+        flag_G3_step = false;
+        flag_L6_active = false;
+        platecount_L6 = 0;
       }
       break;
     }
@@ -381,5 +425,6 @@ void loop() {
     int msg = Serial.read();
     msg_interpret(msg);
   }
+  phase_transition();
   steppers_run();
 }
