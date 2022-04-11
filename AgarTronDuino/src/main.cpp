@@ -35,7 +35,7 @@
 #define PIN_S8 50
 #define PIN_S9 51
 
-//Motor positions
+//Motor positions (These need to be measured and recorded manually, set to 1 as placeholder now)
 #define POS_INF 0x7FFFFFFF
 #define POS_TOP 0
 #define POS_G1389_BOT 1
@@ -69,52 +69,59 @@ enum phase_R9 {phase_R9_1, phase_R9_2, phase_R9_3, phase_R9_2F, phase_R9_3F, pha
 unsigned int timer_L6, timer_L9, timer_R6, timer_R9;
 bool timer_L6_wait, timer_L9_wait, timer_R6_wait, timer_R9_wait;
 
-//Sensor is hit, turn step flag off for corresponding motor
+//Sensor is hit, turn step flag off for corresponding motor and stop it
 void isr_G1(){
   flag_G1_step = false;
-
+  Stepper_G1.stop();
+  Stepper_G1.runToPosition();
 }
 
 void isr_G2(){
   flag_G2_step = false;
-
+  Stepper_G2.stop();
+  Stepper_G2.runToPosition();
 }
 
 void isr_G3(){
   flag_G3_step = false;
-
+  Stepper_G3.stop();
+  Stepper_G3.runToPosition();
 }
 
 void isr_G4(){
   flag_G4_step = false;
-
+  Stepper_G4.stop();
+  Stepper_G4.runToPosition();
 }
 
 void isr_G5(){
   flag_G5_step = false;
   Stepper_G5.stop();
   Stepper_G5.runToPosition();
-  Serial.println("ISR5");
 }
 
 void isr_G6(){
   flag_G6_step = false;
-
+  Stepper_G6.stop();
+  Stepper_G6.runToPosition();
 }
 
 void isr_G7(){
   flag_G7_step = false;
-
+  Stepper_G7.stop();
+  Stepper_G7.runToPosition();
 }
 
 void isr_G8(){
   flag_G8_step = false;
-
+  Stepper_G8.stop();
+  Stepper_G8.runToPosition();
 }
 
 void isr_G9(){
   flag_G9_step = false;
-
+  Stepper_G9.stop();
+  Stepper_G9.runToPosition();
 }
 
 void pins_setup(){
@@ -286,10 +293,11 @@ void steppers_run(){
   }
 }
 
-void msg_interpret(int msg){
+void msg_interpret(int msg){ //Robot will send message when a plate is placed on stacker. 6 or 9 depending on size of plate.
   if(!flag_G5_ready)
     return;
   if(flag_stack_left && msg == 6){
+    flag_stack_left != flag_stack_left; //Stacker will place plates in left and right columns alternatively
     flag_L6_active = true;
     flag_L6_flushing = false;
     curr_phase_L6 = phase_L6::phase_L6_1;
@@ -297,6 +305,7 @@ void msg_interpret(int msg){
     Stepper_G5.moveTo(POS_G5_L6);
   }
   else if(flag_stack_left && msg == 9){
+    flag_stack_left != flag_stack_left;
     flag_L9_active = true;
     flag_L9_flushing = false;
     curr_phase_L9 = phase_L9::phase_L9_1;
@@ -304,6 +313,7 @@ void msg_interpret(int msg){
     Stepper_G5.moveTo(POS_G5_L9);
   }
   else if(!flag_stack_left && msg == 6){
+    flag_stack_left != flag_stack_left;
     flag_R6_active = true;
     flag_R6_flushing = false;
     curr_phase_R6 = phase_R6::phase_R6_1;
@@ -311,6 +321,7 @@ void msg_interpret(int msg){
     Stepper_G5.moveTo(POS_G5_R6);
   }
   else if(!flag_stack_left && msg == 9){
+    flag_stack_left != flag_stack_left;
     flag_R9_active = true;
     flag_R9_flushing = false;
     curr_phase_R9 = phase_R9::phase_R9_1;
@@ -320,8 +331,7 @@ void msg_interpret(int msg){
   flag_G5_ready = false;
 }
 
-void phase_transition()
-{
+void phase_transition_L6(){ //Transitions column Left 6 through all phases in order to stack the plates, flushes if plate count is 5
   if(flag_L6_active){
     switch (curr_phase_L6)
     {
@@ -411,12 +421,280 @@ void phase_transition()
   }
 }
 
+void phase_transition_L9(){ //Transitions column Left 9 through all phases in order to stack the plates, flushes if plate count is 5
+  if(flag_L9_active){
+    switch (curr_phase_L9)
+    {
+    case phase_L9::phase_L9_1:{
+      if(Stepper_G5.distanceToGo() == 0){
+        if(++platecount_L9 == 5){ //If the stack count is 5, flush it (put it on phase 2F)
+          curr_phase_L9 = phase_L9::phase_L9_2F; 
+          flag_L9_flushing = true;
+          timer_L9 = millis();
+          timer_L9_wait = true;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_TOP);
+        }
+        else{ //If the stack count is not 5, move it one step down (put it on phase 2)
+          curr_phase_L9 = phase_L9::phase_L9_2;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_G1389_BOT+platecount_L9);
+        }
+      } 
+      break;
+    }
+    case phase_L9::phase_L9_2:{ //Move slider to the middle
+      if(Stepper_G3.distanceToGo() == 0 ){
+        curr_phase_L9 = phase_L9::phase_L9_3;
+        flag_G3_step = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_L9::phase_L9_3:{
+      if(Stepper_G5.distanceToGo() == 0){
+        flag_L9_active = false;
+        flag_G5_ready = true;
+      }
+      break;
+    }
+    case phase_L9::phase_L9_2F:{
+      if(timer_L9_wait && millis() - timer_L9 >= 1000){ //After we have waited 1 sec for the elevator to descend, we can move the slider back to middle pos and go to 3F
+        curr_phase_L9 = phase_L9::phase_L9_3F;
+        flag_G5_readyChecked = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_L9::phase_L9_3F:{
+      if(Stepper_G5.distanceToGo() == 0 && !!flag_G5_readyChecked){
+        flag_G5_ready = flag_G5_readyChecked = true;
+        flag_G5_step = false;
+      }
+      if(Stepper_G3.distanceToGo() == 0){
+        curr_phase_L9 = phase_L9::phase_L9_4F;
+        flag_G3_step = false;
+        flag_G4_step = true;
+        Stepper_G4.moveTo(POS_G2467_BOT);
+      }
+      break;
+    }
+    case phase_L9::phase_L9_4F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_L9 = phase_L9::phase_L9_5F;
+        Stepper_G4.moveTo(POS_TOP);
+      }
+      break;
+    }
+    case phase_L9::phase_L9_5F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_L9 = phase_L9::phase_L9_6F;
+        flag_G4_step = false;
+        flag_G3_step = true;
+        Stepper_G3.moveTo(POS_G1389_BOT);
+      }
+      break;
+    }
+    case phase_L9::phase_L9_6F:{
+      if(Stepper_G3.distanceToGo() == 0){
+        flag_G3_step = false;
+        flag_L9_active = false;
+        platecount_L9 = 0;
+      }
+      break;
+    }
+    }
+  }
+}
+
+void phase_transition_R6(){ //Transitions column Right 6 through all phases in order to stack the plates, flushes if plate count is 5
+  if(flag_R6_active){
+    switch (curr_phase_R6)
+    {
+    case phase_R6::phase_R6_1:{
+      if(Stepper_G5.distanceToGo() == 0){
+        if(++platecount_R6 == 5){ //If the stack count is 5, flush it (put it on phase 2F)
+          curr_phase_R6 = phase_R6::phase_R6_2F; 
+          flag_R6_flushing = true;
+          timer_R6 = millis();
+          timer_R6_wait = true;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_TOP);
+        }
+        else{ //If the stack count is not 5, move it one step down (put it on phase 2)
+          curr_phase_R6 = phase_R6::phase_R6_2;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_G1389_BOT+platecount_R6);
+        }
+      } 
+      break;
+    }
+    case phase_R6::phase_R6_2:{ //Move slider to the middle
+      if(Stepper_G3.distanceToGo() == 0 ){
+        curr_phase_R6 = phase_R6::phase_R6_3;
+        flag_G3_step = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_R6::phase_R6_3:{
+      if(Stepper_G5.distanceToGo() == 0){
+        flag_R6_active = false;
+        flag_G5_ready = true;
+      }
+      break;
+    }
+    case phase_R6::phase_R6_2F:{
+      if(timer_R6_wait && millis() - timer_R6 >= 1000){ //After we have waited 1 sec for the elevator to descend, we can move the slider back to middle pos and go to 3F
+        curr_phase_R6 = phase_R6::phase_R6_3F;
+        flag_G5_readyChecked = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_R6::phase_R6_3F:{
+      if(Stepper_G5.distanceToGo() == 0 && !!flag_G5_readyChecked){
+        flag_G5_ready = flag_G5_readyChecked = true;
+        flag_G5_step = false;
+      }
+      if(Stepper_G3.distanceToGo() == 0){
+        curr_phase_R6 = phase_R6::phase_R6_4F;
+        flag_G3_step = false;
+        flag_G4_step = true;
+        Stepper_G4.moveTo(POS_G2467_BOT);
+      }
+      break;
+    }
+    case phase_R6::phase_R6_4F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_R6 = phase_R6::phase_R6_5F;
+        Stepper_G4.moveTo(POS_TOP);
+      }
+      break;
+    }
+    case phase_R6::phase_R6_5F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_R6 = phase_R6::phase_R6_6F;
+        flag_G4_step = false;
+        flag_G3_step = true;
+        Stepper_G3.moveTo(POS_G1389_BOT);
+      }
+      break;
+    }
+    case phase_R6::phase_R6_6F:{
+      if(Stepper_G3.distanceToGo() == 0){
+        flag_G3_step = false;
+        flag_R6_active = false;
+        platecount_R6 = 0;
+      }
+      break;
+    }
+    }
+  }
+}
+
+void phase_transition_R9(){ //Transitions column Right 9 through all phases in order to stack the plates, flushes if plate count is 5
+  if(flag_R9_active){
+    switch (curr_phase_R9)
+    {
+    case phase_R9::phase_R9_1:{
+      if(Stepper_G5.distanceToGo() == 0){
+        if(++platecount_R9 == 5){ //If the stack count is 5, flush it (put it on phase 2F)
+          curr_phase_R9 = phase_R9::phase_R9_2F; 
+          flag_R9_flushing = true;
+          timer_R9 = millis();
+          timer_R9_wait = true;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_TOP);
+        }
+        else{ //If the stack count is not 5, move it one step down (put it on phase 2)
+          curr_phase_R9 = phase_R9::phase_R9_2;
+          flag_G5_step = false;
+          flag_G3_step = true;
+          Stepper_G3.moveTo(POS_G1389_BOT+platecount_R9);
+        }
+      } 
+      break;
+    }
+    case phase_R9::phase_R9_2:{ //Move slider to the middle
+      if(Stepper_G3.distanceToGo() == 0 ){
+        curr_phase_R9 = phase_R9::phase_R9_3;
+        flag_G3_step = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_R9::phase_R9_3:{
+      if(Stepper_G5.distanceToGo() == 0){
+        flag_R9_active = false;
+        flag_G5_ready = true;
+      }
+      break;
+    }
+    case phase_R9::phase_R9_2F:{
+      if(timer_R9_wait && millis() - timer_R9 >= 1000){ //After we have waited 1 sec for the elevator to descend, we can move the slider back to middle pos and go to 3F
+        curr_phase_R9 = phase_R9::phase_R9_3F;
+        flag_G5_readyChecked = false;
+        flag_G5_step = true;
+        Stepper_G5.moveTo(POS_G5_MID);
+      }
+      break;
+    }
+    case phase_R9::phase_R9_3F:{
+      if(Stepper_G5.distanceToGo() == 0 && !!flag_G5_readyChecked){
+        flag_G5_ready = flag_G5_readyChecked = true;
+        flag_G5_step = false;
+      }
+      if(Stepper_G3.distanceToGo() == 0){
+        curr_phase_R9 = phase_R9::phase_R9_4F;
+        flag_G3_step = false;
+        flag_G4_step = true;
+        Stepper_G4.moveTo(POS_G2467_BOT);
+      }
+      break;
+    }
+    case phase_R9::phase_R9_4F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_R9 = phase_R9::phase_R9_5F;
+        Stepper_G4.moveTo(POS_TOP);
+      }
+      break;
+    }
+    case phase_R9::phase_R9_5F:{
+      if(Stepper_G4.distanceToGo() == 0){
+        curr_phase_R9 = phase_R9::phase_R9_6F;
+        flag_G4_step = false;
+        flag_G3_step = true;
+        Stepper_G3.moveTo(POS_G1389_BOT);
+      }
+      break;
+    }
+    case phase_R9::phase_R9_6F:{
+      if(Stepper_G3.distanceToGo() == 0){
+        flag_G3_step = false;
+        flag_R9_active = false;
+        platecount_R9 = 0;
+      }
+      break;
+    }
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pins_setup();
   steppers_setup();
-  flag_G5_step = true;
-  Stepper_G5.moveTo(99999999);
 }
 
 void loop() {
@@ -425,6 +703,9 @@ void loop() {
     int msg = Serial.read();
     msg_interpret(msg);
   }
-  phase_transition();
+  phase_transition_L6();
+  phase_transition_L9();
+  phase_transition_R6();
+  phase_transition_R9();
   steppers_run();
 }
